@@ -1,0 +1,12 @@
+3-Block CNN with Remax on CIFAR-10
+==================================================
+
+Training epochs: 100
+Batch size: 128
+Best epoch: 84
+Best validation NLL: 0.9228
+
+Final Test Results:
+  NLL:      0.8589
+  Error:    29.42%
+  Accuracy: 70.58%

@@ -1,0 +1,27 @@
+# Default configuration for CIFAR-10 experiments
+
+training:
+  epochs: 50
+  batch_size: 128
+  learning_rate: 0.001
+  validation_split: 0.1
+
+model:
+  architecture: "3cnn_remax"  # 3-Block CNN with Remax
+  classification_head: "remax"
+  num_classes: 10
+
+data:
+  dataset: "cifar10"
+  normalize: true
+  data_augmentation: true
+  data_dir: "./data"
+
+evaluation:
+  metrics: ["accuracy", "nll", "ece"]
+  ece_bins: 15
+
+output:
+  save_dir: "./results/cifar10"
+  save_checkpoints: true
+  checkpoint_frequency: 20

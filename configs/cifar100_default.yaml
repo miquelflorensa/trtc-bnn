@@ -1,0 +1,27 @@
+# Default configuration for CIFAR-100 experiments
+
+training:
+  epochs: 200
+  batch_size: 64
+  learning_rate: 0.001
+  validation_split: 0.1
+
+model:
+  architecture: "cnn"  # Convolutional Neural Network
+  classification_head: "remax"
+  num_classes: 100
+
+data:
+  dataset: "cifar100"
+  normalize: true
+  data_augmentation: true
+  data_dir: "./data"
+
+evaluation:
+  metrics: ["accuracy", "nll", "ece"]
+  ece_bins: 15
+
+output:
+  save_dir: "./results/cifar100"
+  save_checkpoints: true
+  checkpoint_frequency: 20

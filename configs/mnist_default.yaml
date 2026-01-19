@@ -1,0 +1,28 @@
+# Default configuration for MNIST experiments
+
+training:
+  epochs: 100
+  batch_size: 32
+  learning_rate: 0.001
+  validation_split: 0.1
+
+model:
+  architecture: "fnn"  # Feedforward Neural Network
+  hidden_layers: [512, 256]
+  activation: "relu"
+  classification_head: "remax"
+  num_classes: 10
+
+data:
+  dataset: "mnist"
+  normalize: true
+  data_dir: "./data"
+
+evaluation:
+  metrics: ["accuracy", "nll", "ece"]
+  ece_bins: 15
+
+output:
+  save_dir: "./results/mnist"
+  save_checkpoints: true
+  checkpoint_frequency: 10
