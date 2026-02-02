@@ -12,51 +12,59 @@ We propose analytically tractable methods for real-to-categorical transformation
 
 ```
 trtc-bnn/
-├── src/                          # Source code
-│   ├── models/                   # BNN model architectures
-│   │   ├── bnn_mnist.py          # BNN for MNIST
-│   │   ├── bnn_cifar.py          # BNN for CIFAR
-│   │   └── remax_head.py         # Remax classification head
-│   ├── methods/                  # Proposed methods
-│   │   ├── method_1.py           # Method 1 implementation
-│   │   ├── method_2.py           # Method 2 implementation
-│   │   ├── method_3.py           # Method 3 implementation
-│   │   ├── mc_samples.py         # MC sampling baseline
-│   │   └── comparison.py         # Method comparison utilities
-│   ├── metrics/                  # Evaluation metrics
-│   │   ├── nll.py                # Negative Log-Likelihood
-│   │   ├── ece.py                # Expected Calibration Error
-│   │   └── accuracy.py           # Accuracy metrics
-│   ├── data/                     # Data loading utilities
-│   │   ├── mnist_loader.py       # MNIST data loader
-│   │   └── cifar_loader.py       # CIFAR data loader
-│   ├── training/                 # Training utilities
-│   │   └── trainer.py            # BNN trainer using cuTAGI
-│   └── utils/                    # Utility functions
-│       ├── config.py             # Configuration utilities
-│       └── visualization.py      # Plotting utilities
-├── scripts/                      # Runnable scripts
-│   ├── train_mnist.py            # Train BNN on MNIST
-│   ├── train_cifar.py            # Train BNN on CIFAR
-│   ├── evaluate.py               # Evaluate trained models
-│   ├── compare_methods.py        # Compare methods with MC sampling
-│   └── generate_plots.py         # Generate paper figures
-├── configs/                      # Configuration files
-│   ├── mnist_default.yaml        # MNIST experiment config
-│   ├── cifar10_default.yaml      # CIFAR-10 experiment config
-│   └── cifar100_default.yaml     # CIFAR-100 experiment config
-├── experiments/                  # Experiment runners
-│   └── run_all_experiments.py    # Run all paper experiments
-├── tests/                        # Unit tests
-│   ├── test_metrics.py           # Tests for metrics
-│   └── test_methods.py           # Tests for methods
-├── data/                         # Dataset storage (gitignored)
-├── results/                      # Experiment results (gitignored)
-├── figures/                      # Generated figures (gitignored)
-├── checkpoints/                  # Model checkpoints (gitignored)
-├── requirements.txt              # Python dependencies
-├── setup.py                      # Package setup
-└── README.md                     # This file
+├── src/                              # Source code (library)
+│   ├── models/                       # BNN model architectures
+│   │   ├── bnn_mnist.py              # BNN for MNIST
+│   │   ├── bnn_cifar.py              # BNN for CIFAR
+│   │   └── remax_head.py             # Remax classification head
+│   ├── methods/                      # Proposed analytical methods
+│   │   ├── mm_remax.py               # Moment-matching for Remax
+│   │   ├── mm_softmax.py             # Moment-matching for Softmax
+│   │   ├── ll_softmax.py             # Log-linear Softmax approximation
+│   │   ├── mc_remax.py               # Monte Carlo Remax (baseline)
+│   │   └── mc_softmax.py             # Monte Carlo Softmax (baseline)
+│   ├── metrics/                      # Evaluation metrics
+│   │   ├── nll.py                    # Negative Log-Likelihood
+│   │   ├── ece.py                    # Expected Calibration Error
+│   │   └── accuracy.py               # Accuracy metrics
+│   ├── data/                         # Data loading utilities
+│   │   ├── mnist_loader.py           # MNIST data loader
+│   │   └── cifar_loader.py           # CIFAR data loader
+│   ├── training/                     # Training utilities
+│   │   └── trainer.py                # BNN trainer using cuTAGI
+│   └── utils/                        # Utility functions
+│       ├── config.py                 # Configuration utilities
+│       └── visualization.py          # Plotting utilities
+├── scripts/                          # Runnable scripts
+│   ├── train.py                      # Unified training script
+│   ├── evaluate.py                   # Evaluate trained models
+│   ├── compare_methods.py            # Compare methods with MC sampling
+│   ├── compare_mm_remax_vs_mc.py     # Detailed Remax comparison
+│   ├── compare_mm_softmax_vs_mc.py   # Detailed Softmax comparison
+│   ├── generate_figures.py           # Generate paper figures
+│   ├── plot_method_comparison.py     # Plot comparison results
+│   ├── plot_softmax_comparison.py    # Plot softmax comparison
+│   ├── plot_variance_delta_grid.py   # Plot variance-delta grids
+│   └── run_all_experiments.py        # Run all paper experiments
+├── tests/                            # Unit tests and development scripts
+│   ├── test_methods.py               # Tests for analytical methods
+│   ├── test_metrics.py               # Tests for metrics
+│   ├── test_scheduler.py             # Tests for sigma_v scheduler
+│   └── test_qualitative_plots.py     # Tests for plotting functions
+├── configs/                          # Configuration files
+│   ├── mnist_default.yaml            # MNIST experiment config
+│   ├── cifar10_default.yaml          # CIFAR-10 experiment config
+│   └── cifar100_default.yaml         # CIFAR-100 experiment config
+├── docs/                             # Documentation
+│   └── SIGMA_V_SCHEDULER.md          # Observation noise scheduler docs
+├── checkpoints/                      # Model checkpoints
+├── data/                             # Dataset storage (gitignored)
+├── results/                          # Experiment results
+├── figures/                          # Generated figures
+├── requirements.txt                  # Python dependencies
+├── setup.py                          # Package setup
+├── CHANGELOG.md                      # Version history
+└── README.md                         # This file
 ```
 
 ## Installation
@@ -85,21 +93,20 @@ pip install pytagi
 
 ## Usage
 
-### Training BNN on MNIST
+### Training BNN
+
+The unified training script supports multiple datasets and classification heads:
 
 ```bash
-python scripts/train_mnist.py --config configs/mnist_default.yaml
-```
+# Train on CIFAR-10 with Remax head (default)
+python scripts/train.py --dataset cifar10 --head remax --epochs 50
 
-### Training BNN on CIFAR-10
+# Train on MNIST with Softmax head
+python scripts/train.py --dataset mnist --head softmax --epochs 50
 
-```bash
-python scripts/train_cifar.py --config configs/cifar10_default.yaml --cifar-version 10
-```
-
-Or using the 3-block CNN with Remax:
-```bash
-python scripts/train_3cnn_cifar10.py --epochs 50 --batch-size 128
+# Train with custom hyperparameters
+python scripts/train.py --dataset cifar10 --head remax \
+    --epochs 100 --batch-size 64 --sigma-v-schedule cosine
 ```
 
 #### Observation Noise Scheduling
@@ -108,59 +115,68 @@ The training script supports dynamic scheduling of the observation noise paramet
 
 ```bash
 # Constant noise (default)
-python scripts/train_3cnn_cifar10.py --sigma-v-min 0.001
+python scripts/train.py --sigma-v-max 0.1 --sigma-v-schedule constant
 
-# Linear increase
-python scripts/train_3cnn_cifar10.py --sigma-v-min 0.001 --sigma-v-max 0.1 --sigma-v-schedule linear
+# Linear decay from max to min
+python scripts/train.py --sigma-v-min 0.001 --sigma-v-max 0.1 --sigma-v-schedule linear
 
 # Cosine annealing
-python scripts/train_3cnn_cifar10.py --sigma-v-min 0.001 --sigma-v-max 0.1 --sigma-v-schedule cosine
+python scripts/train.py --sigma-v-min 0.001 --sigma-v-max 0.1 --sigma-v-schedule cosine
 
-# Exponential growth
-python scripts/train_3cnn_cifar10.py --sigma-v-min 0.001 --sigma-v-max 0.1 --sigma-v-schedule exponential
+# Exponential decay
+python scripts/train.py --sigma-v-min 0.001 --sigma-v-max 0.1 --sigma-v-schedule exponential
 ```
 
 See [docs/SIGMA_V_SCHEDULER.md](docs/SIGMA_V_SCHEDULER.md) for detailed documentation.
 
-### Training BNN on CIFAR-100
-
-```bash
-python scripts/train_cifar.py --config configs/cifar100_default.yaml --cifar-version 100
-```
-
 ### Evaluating a Trained Model
 
 ```bash
-python scripts/evaluate.py --model-path checkpoints/model.pt --dataset mnist
+python scripts/evaluate.py --checkpoint checkpoints/cifar10_remax_best.bin --dataset cifar10
 ```
 
-### Comparing Methods with MC Sampling
+### Comparing Analytical Methods with MC Sampling
 
 ```bash
-python scripts/compare_methods.py --mc-samples 10000
+# Compare MM-Remax vs MC-Remax
+python scripts/compare_mm_remax_vs_mc.py --epochs 50 --mc-samples 10000
+
+# Compare MM-Softmax vs MC-Softmax
+python scripts/compare_mm_softmax_vs_mc.py --epochs 50 --mc-samples 10000
 ```
 
 ### Running All Experiments
 
 ```bash
-python experiments/run_all_experiments.py
+# Run all experiments
+python scripts/run_all_experiments.py
+
+# Dry run (print commands without executing)
+python scripts/run_all_experiments.py --dry-run
+
+# Run specific experiments
+python scripts/run_all_experiments.py --experiments cifar10_remax comparison_remax
 ```
 
 ### Generating Paper Figures
 
 ```bash
-python scripts/generate_plots.py --results-dir results --output-dir figures
+python scripts/generate_figures.py --results-dir results --output-dir figures
+python scripts/plot_method_comparison.py --results results/method_comparison/mm_remax_comparison.npz
+python scripts/plot_variance_delta_grid.py --method mm_remax --output-dir figures
 ```
 
 ## Proposed Methods
 
-We propose three analytically tractable methods for real-to-categorical transformations:
+We propose analytically tractable methods for real-to-categorical transformations:
 
-1. **Method 1**: [Brief description]
-2. **Method 2**: [Brief description]
-3. **Method 3**: [Brief description]
+| Method | Description |
+|--------|-------------|
+| **MM-Remax** | Moment-matching approximation for the Remax transformation |
+| **MM-Softmax** | Moment-matching approximation for the Softmax transformation |
+| **LL-Softmax** | Log-linear approximation for Softmax |
 
-All methods are compared against Monte Carlo sampling baselines.
+All analytical methods are compared against Monte Carlo sampling baselines (MC-Remax, MC-Softmax).
 
 ## Remax Classification Head
 
@@ -170,8 +186,9 @@ The Remax classification head provides an analytically tractable alternative to 
 
 We evaluate our methods using:
 - **Accuracy**: Classification accuracy
-- **NLL**: Negative Log-Likelihood
+- **NLL**: Negative Log-Likelihood  
 - **ECE**: Expected Calibration Error
+- **MAE**: Mean Absolute Error (for method comparison)
 
 ## Citation
 
