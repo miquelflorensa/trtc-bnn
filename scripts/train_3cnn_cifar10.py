@@ -50,6 +50,76 @@ RESULTS_DIR = "./results"
 
 
 # ============================================================================
+# Sigma_v Scheduler
+# ============================================================================
+
+class SigmaVScheduler:
+    """
+    Scheduler for observation noise (sigma_v) during training.
+    
+    Supports different scheduling strategies:
+    - 'constant': No change (sigma_v stays at sigma_v_min)
+    - 'linear': Linear interpolation from sigma_v_min to sigma_v_max
+    - 'cosine': Cosine annealing from sigma_v_min to sigma_v_max
+    - 'exponential': Exponential decay/growth from sigma_v_min to sigma_v_max
+    """
+    
+    def __init__(self, sigma_v_min: float, sigma_v_max: float, 
+                 total_epochs: int, schedule_type: str = 'constant'):
+        """
+        Initialize the scheduler.
+        
+        Args:
+            sigma_v_min: Minimum (ending) sigma_v value
+            sigma_v_max: Maximum (starting) sigma_v value
+            total_epochs: Total number of training epochs
+            schedule_type: Type of schedule ('constant', 'linear', 'cosine', 'exponential')
+        """
+        self.sigma_v_min = sigma_v_min
+        self.sigma_v_max = sigma_v_max
+        self.total_epochs = total_epochs
+        self.schedule_type = schedule_type
+        
+    def get_sigma_v(self, epoch: int) -> float:
+        """
+        Get sigma_v value for the current epoch.
+        Decays from sigma_v_max (start) to sigma_v_min (end).
+        
+        Args:
+            epoch: Current epoch (0-indexed)
+            
+        Returns:
+            sigma_v value for this epoch
+        """
+        if self.schedule_type == 'constant':
+            return self.sigma_v_max
+            
+        # Progress through training (0.0 to 1.0)
+        progress = epoch / max(self.total_epochs - 1, 1)
+        
+        if self.schedule_type == 'linear':
+            # Linear decay from max to min
+            return self.sigma_v_max - (self.sigma_v_max - self.sigma_v_min) * progress
+            
+        elif self.schedule_type == 'cosine':
+            # Cosine annealing from max to min
+            return self.sigma_v_min + (self.sigma_v_max - self.sigma_v_min) * \
+                   (1 + np.cos(progress * np.pi)) / 2
+                   
+        elif self.schedule_type == 'exponential':
+            # Exponential decay from max to min
+            if self.sigma_v_min > 0 and self.sigma_v_max > 0:
+                ratio = self.sigma_v_min / self.sigma_v_max
+                return self.sigma_v_max * (ratio ** progress)
+            else:
+                # Fallback to linear if either is 0
+                return self.sigma_v_max - (self.sigma_v_max - self.sigma_v_min) * progress
+                
+        else:
+            raise ValueError(f"Unknown schedule type: {self.schedule_type}")
+
+
+# ============================================================================
 # Model Definition
 # ============================================================================
 
@@ -376,7 +446,8 @@ def evaluate(model: Sequential, data_loader, desc: str = "Evaluating"):
 def train(epochs: int = EPOCHS, batch_size: int = BATCH_SIZE, 
           validation_split: float = VALIDATION_SPLIT,
           data_dir: str = DATA_DIR, save_dir: str = SAVE_DIR,
-          results_dir: str = RESULTS_DIR, sigma_v: float = 0.1,
+          results_dir: str = RESULTS_DIR, sigma_v_min: float = 0.001,
+          sigma_v_max: float = 0.1, sigma_v_schedule: str = 'constant',
           device: str = "cuda"):
     """
     Main training function.
@@ -388,7 +459,9 @@ def train(epochs: int = EPOCHS, batch_size: int = BATCH_SIZE,
         data_dir: Directory for data
         save_dir: Directory to save checkpoints
         results_dir: Directory to save results
-        sigma_v: Observation noise standard deviation
+        sigma_v_min: Minimum (ending) observation noise standard deviation
+        sigma_v_max: Maximum (starting) observation noise standard deviation
+        sigma_v_schedule: Schedule type ('constant', 'linear', 'cosine', 'exponential')
         device: Device to run on ('cpu' or 'cuda')
     """
     # Create directories
@@ -420,7 +493,16 @@ def train(epochs: int = EPOCHS, batch_size: int = BATCH_SIZE,
     # Create output updater
     out_updater = OutputUpdater(model.device)
     
-    # Observation variance for Remax
+    # Initialize sigma_v scheduler
+    scheduler = SigmaVScheduler(
+        sigma_v_min=sigma_v_min,
+        sigma_v_max=sigma_v_max,
+        total_epochs=epochs,
+        schedule_type=sigma_v_schedule
+    )
+    
+    # Initial observation variance for Remax (will be updated each epoch)
+    sigma_v = scheduler.get_sigma_v(0)
     var_y = np.full((batch_size * 10,), sigma_v**2, dtype=np.float32)
     
     print(f"Model architecture: 3-Block CNN with Remax")
@@ -429,6 +511,11 @@ def train(epochs: int = EPOCHS, batch_size: int = BATCH_SIZE,
     print(f"  Block 2: 128 channels, 16->8")
     print(f"  Block 3: 256 channels, 8->4")
     print(f"  Classifier: 4096->512->10")
+    print(f"\nObservation noise (sigma_v) schedule:")
+    print(f"  Start (Max): {sigma_v_max:.4f}")
+    print(f"  End (Min):   {sigma_v_min:.4f}")
+    print(f"  Schedule:    {sigma_v_schedule}")
+    print(f"  Initial σ_v: {sigma_v:.4f} → Final σ_v: {scheduler.get_sigma_v(epochs-1):.4f}")
     
     # Training history
     history = {
@@ -438,6 +525,7 @@ def train(epochs: int = EPOCHS, batch_size: int = BATCH_SIZE,
         "val_error": [],
         "test_nll": [],
         "test_error": [],
+        "sigma_v": [],
     }
     
     best_val_nll = float("inf")
@@ -450,6 +538,10 @@ def train(epochs: int = EPOCHS, batch_size: int = BATCH_SIZE,
     
     for epoch in range(epochs):
         epoch_start = time.time()
+        
+        # Update sigma_v for this epoch
+        sigma_v = scheduler.get_sigma_v(epoch)
+        var_y = np.full((batch_size * 10,), sigma_v**2, dtype=np.float32)
         
         # Training
         train_metrics = train_epoch(model, out_updater, train_loader, var_y, epoch)
@@ -467,11 +559,12 @@ def train(epochs: int = EPOCHS, batch_size: int = BATCH_SIZE,
         history["val_error"].append(val_metrics["error"])
         history["test_nll"].append(test_metrics["nll"])
         history["test_error"].append(test_metrics["error"])
+        history["sigma_v"].append(sigma_v)
         
         epoch_time = time.time() - epoch_start
         
         # Print epoch summary
-        print(f"Epoch {epoch+1:3d}/{epochs} ({epoch_time:.1f}s) | "
+        print(f"Epoch {epoch+1:3d}/{epochs} ({epoch_time:.1f}s) | σ_v: {sigma_v:.4f} | "
               f"Train NLL: {train_metrics['nll']:.4f}, Err: {train_metrics['error']:.2f}% | "
               f"Val NLL: {val_metrics['nll']:.4f}, Err: {val_metrics['error']:.2f}% | "
               f"Test NLL: {test_metrics['nll']:.4f}, Err: {test_metrics['error']:.2f}%")
@@ -548,8 +641,13 @@ if __name__ == "__main__":
                         help=f"Batch size (default: {BATCH_SIZE})")
     parser.add_argument("--val-split", type=float, default=VALIDATION_SPLIT,
                         help=f"Validation split (default: {VALIDATION_SPLIT})")
-    parser.add_argument("--sigma-v", type=float, default=0.001,
-                        help="Observation noise std (default: 0.1)")
+    parser.add_argument("--sigma-v-min", type=float, default=0.001,
+                        help="Minimum (ending) observation noise std (default: 0.001)")
+    parser.add_argument("--sigma-v-max", type=float, default=0.1,
+                        help="Maximum (starting) observation noise std (default: 0.1)")
+    parser.add_argument("--sigma-v-schedule", type=str, default="constant",
+                        choices=["constant", "linear", "cosine", "exponential"],
+                        help="Observation noise schedule (default: constant)")
     parser.add_argument("--device", type=str, default="cuda",
                         choices=["cpu", "cuda"],
                         help="Device to run on (default: cuda)")
@@ -569,6 +667,8 @@ if __name__ == "__main__":
         data_dir=args.data_dir,
         save_dir=args.save_dir,
         results_dir=args.results_dir,
-        sigma_v=args.sigma_v,
+        sigma_v_min=args.sigma_v_min,
+        sigma_v_max=args.sigma_v_max,
+        sigma_v_schedule=args.sigma_v_schedule,
         device=args.device
     )

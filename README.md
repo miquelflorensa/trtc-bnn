@@ -97,6 +97,31 @@ python scripts/train_mnist.py --config configs/mnist_default.yaml
 python scripts/train_cifar.py --config configs/cifar10_default.yaml --cifar-version 10
 ```
 
+Or using the 3-block CNN with Remax:
+```bash
+python scripts/train_3cnn_cifar10.py --epochs 50 --batch-size 128
+```
+
+#### Observation Noise Scheduling
+
+The training script supports dynamic scheduling of the observation noise parameter (σ_v):
+
+```bash
+# Constant noise (default)
+python scripts/train_3cnn_cifar10.py --sigma-v-min 0.001
+
+# Linear increase
+python scripts/train_3cnn_cifar10.py --sigma-v-min 0.001 --sigma-v-max 0.1 --sigma-v-schedule linear
+
+# Cosine annealing
+python scripts/train_3cnn_cifar10.py --sigma-v-min 0.001 --sigma-v-max 0.1 --sigma-v-schedule cosine
+
+# Exponential growth
+python scripts/train_3cnn_cifar10.py --sigma-v-min 0.001 --sigma-v-max 0.1 --sigma-v-schedule exponential
+```
+
+See [docs/SIGMA_V_SCHEDULER.md](docs/SIGMA_V_SCHEDULER.md) for detailed documentation.
+
 ### Training BNN on CIFAR-100
 
 ```bash

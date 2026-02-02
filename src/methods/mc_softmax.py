@@ -35,6 +35,7 @@ def mc_softmax(
         dict: A dictionary containing:
             - mu_a: Expected value of softmax outputs (empirical mean). Shape: (K,) or (B, K)
             - sigma_a_sq: Variance of softmax outputs (empirical variance). Shape: (K,) or (B, K)
+            - cov_z_a: Covariance between Z and A. Shape: (K,) or (B, K)
             - samples: Raw softmax samples. Shape: (n_samples, K) or (n_samples, B, K)
     """
     if rng is None:
@@ -47,29 +48,39 @@ def mc_softmax(
         sigma_z_sq = sigma_z_sq[np.newaxis, :]  # (1, K)
     
     B, K = mu_z.shape
-    sigma_z = np.sqrt(sigma_z_sq)  # (B, K)
+    sigma_z = np.sqrt(np.maximum(sigma_z_sq, 0))  # (B, K), ensure non-negative
     
     # Draw samples: shape (n_samples, B, K)
     Z = rng.normal(loc=mu_z, scale=sigma_z, size=(n_samples, B, K))
     
+    # Handle any NaN/inf values that might have been generated
+    Z = np.nan_to_num(Z, nan=0.0, posinf=500.0, neginf=-500.0)
+    
     # Compute softmax per sample (numerically stable)
     Z_max = np.max(Z, axis=-1, keepdims=True)  # (n_samples, B, 1)
     e = np.exp(Z - Z_max)  # (n_samples, B, K)
-    A = e / np.sum(e, axis=-1, keepdims=True)  # (n_samples, B, K)
+    e_sum = np.sum(e, axis=-1, keepdims=True)
+    e_sum = np.maximum(e_sum, 1e-30)  # Prevent division by zero
+    A = e / e_sum  # (n_samples, B, K)
     
     # Compute empirical moments
     mu_a = np.mean(A, axis=0)  # (B, K)
     sigma_a_sq = np.var(A, axis=0)  # (B, K)
     
+    # Compute covariance between Z and A: Cov(Z, A) = E[Z*A] - E[Z]*E[A]
+    cov_z_a = np.mean(Z * A, axis=0) - mu_z * mu_a  # (B, K)
+    
     # Squeeze back to original shape if single sample
     if single_sample:
         mu_a = mu_a.squeeze(0)
         sigma_a_sq = sigma_a_sq.squeeze(0)
+        cov_z_a = cov_z_a.squeeze(0)
         A = A.squeeze(1)  # (n_samples, K)
     
     return {
         "mu_a": mu_a,
         "sigma_a_sq": sigma_a_sq,
+        "cov_z_a": cov_z_a,
         "samples": A
     }
 

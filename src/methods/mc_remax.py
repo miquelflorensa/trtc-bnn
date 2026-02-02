@@ -41,6 +41,7 @@ def mc_remax(
             - sigma_a_sq: Variance of Remax outputs (empirical variance). Shape: (K,) or (B, K)
             - mu_m: Expected value of ReLU outputs. Shape: (K,) or (B, K)
             - sigma_m_sq: Variance of ReLU outputs. Shape: (K,) or (B, K)
+            - cov_z_a: Covariance between Z and A. Shape: (K,) or (B, K)
             - samples: Raw Remax samples. Shape: (n_samples, K) or (n_samples, B, K)
     """
     if rng is None:
@@ -73,12 +74,16 @@ def mc_remax(
     mu_m = np.mean(M, axis=0)  # (B, K)
     sigma_m_sq = np.var(M, axis=0)  # (B, K)
     
+    # Compute covariance between Z and A: Cov(Z, A) = E[Z*A] - E[Z]*E[A]
+    cov_z_a = np.mean(Z * A, axis=0) - mu_z * mu_a  # (B, K)
+    
     # Squeeze back to original shape if single sample
     if single_sample:
         mu_a = mu_a.squeeze(0)
         sigma_a_sq = sigma_a_sq.squeeze(0)
         mu_m = mu_m.squeeze(0)
         sigma_m_sq = sigma_m_sq.squeeze(0)
+        cov_z_a = cov_z_a.squeeze(0)
         A = A.squeeze(1)  # (n_samples, K)
     
     return {
@@ -86,6 +91,7 @@ def mc_remax(
         "sigma_a_sq": sigma_a_sq,
         "mu_m": mu_m,
         "sigma_m_sq": sigma_m_sq,
+        "cov_z_a": cov_z_a,
         "samples": A
     }
 

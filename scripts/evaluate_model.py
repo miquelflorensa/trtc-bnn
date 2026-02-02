@@ -84,6 +84,38 @@ def build_3cnn_remax():
     return model
 
 
+def build_3cnn_logits():
+    """
+    Build the 3-block CNN WITHOUT Remax (outputs logits).
+    Used to visualize the logit distributions before Remax transformation.
+    """
+    model = Sequential(
+        Conv2d(3, 64, 3, bias=True, padding=1, in_width=32, in_height=32, 
+               gain_weight=GAIN_W, gain_bias=GAIN_B),
+        MixtureReLU(),
+        Conv2d(64, 64, 4, bias=True, padding=1, stride=2, 
+               gain_weight=GAIN_W, gain_bias=GAIN_B),
+        MixtureReLU(),
+        Conv2d(64, 128, 3, bias=True, padding=1, 
+               gain_weight=GAIN_W, gain_bias=GAIN_B),
+        MixtureReLU(),
+        Conv2d(128, 128, 4, bias=True, padding=1, stride=2, 
+               gain_weight=GAIN_W, gain_bias=GAIN_B),
+        MixtureReLU(),
+        Conv2d(128, 256, 3, bias=True, padding=1, 
+               gain_weight=GAIN_W, gain_bias=GAIN_B),
+        MixtureReLU(),
+        Conv2d(256, 256, 4, bias=True, padding=1, stride=2, 
+               gain_weight=GAIN_W, gain_bias=GAIN_B),
+        MixtureReLU(),
+        Linear(256 * 4 * 4, 512, gain_weight=GAIN_W, gain_bias=GAIN_B),
+        MixtureReLU(),
+        Linear(512, 10, gain_weight=GAIN_W, gain_bias=GAIN_B),
+        # No Remax - outputs raw logits
+    )
+    return model
+
+
 # ============================================================================
 # Data Loading
 # ============================================================================
@@ -184,6 +216,33 @@ def run_inference(model: Sequential, data_loader, max_batches: int = None):
     return (np.vstack(all_probs), 
             np.vstack(all_var_probs), 
             np.concatenate(all_labels))
+
+
+def run_inference_single(model: Sequential, image: np.ndarray):
+    """
+    Run inference on a single image.
+    
+    Args:
+        model: The model (with or without Remax)
+        image: Image array (C, H, W) normalized
+        
+    Returns:
+        mu: Mean outputs (C,)
+        var: Variance of outputs (C,)
+    """
+    model.eval()
+    
+    # Reshape to (1, C*H*W)
+    flat_image = image.reshape(1, -1)
+    
+    # Forward pass
+    m_pred, v_pred = model(flat_image)
+    
+    # Reshape to (C,)
+    mu = np.reshape(m_pred, (NUM_CLASSES,))
+    var = np.reshape(v_pred, (NUM_CLASSES,))
+    
+    return mu, var
 
 
 # ============================================================================
@@ -499,16 +558,254 @@ def plot_prediction_example(image, true_label, mu_probs, sigma_probs,
     print(f"{'='*60}\n")
 
 
-def plot_qualitative_examples(model, raw_dataset, test_loader, 
-                               num_examples=3, save_dir=None):
+def plot_prediction_with_logits(image, true_label, mu_logits, sigma_logits,
+                                 mu_probs, sigma_probs, image_idx=0, save_path=None):
+    """
+    Plot image with error bars for both logits and probabilities.
+    
+    Three-panel figure:
+        1. Left: Original image
+        2. Middle: Logits with uncertainty (μ_z ± σ_z)
+        3. Right: Probabilities with uncertainty (μ_a ± σ_a)
+    
+    Args:
+        image: Image array (CHW format, values in [0, 1])
+        true_label: True class label
+        mu_logits: Mean logits (C,)
+        sigma_logits: Standard deviation of logits (C,)
+        mu_probs: Mean probabilities (C,)
+        sigma_probs: Standard deviation of probabilities (C,)
+        image_idx: Image index for title
+        save_path: Path to save figure
+    """
+    pred_label = np.argmax(mu_probs)
+    
+    # Create figure with 3 subplots
+    fig, (ax_img, ax_logits, ax_probs) = plt.subplots(1, 3, figsize=(18, 5))
+    
+    # Color scheme
+    logit_color = '#E24A4A'   # Red for logits
+    prob_color = '#4A90E2'    # Blue for probabilities
+    
+    classes = np.arange(NUM_CLASSES)
+    
+    # ===== Plot 1: Original Image =====
+    # Convert CHW to HWC for display
+    if image.shape[0] == 3:
+        img_display = np.transpose(image, (1, 2, 0))
+    else:
+        img_display = image
+    
+    # Clip to valid range
+    img_display = np.clip(img_display, 0, 1)
+    
+    ax_img.imshow(img_display)
+    ax_img.axis('off')
+    
+    correct = pred_label == true_label
+    ax_img.set_title(
+        f'True: {CIFAR10_CLASSES[true_label]}\n'
+        f'Predicted: {CIFAR10_CLASSES[pred_label]}',
+        fontsize=12,
+        fontweight='bold',
+        color='green' if correct else 'red'
+    )
+    
+    # ===== Plot 2: Logits with Error Bars =====
+    for i in classes:
+        # Draw error bars
+        ax_logits.errorbar(i, mu_logits[i], yerr=sigma_logits[i], fmt='none', 
+                          ecolor=logit_color, elinewidth=1.5, capsize=5)
+        # Draw horizontal lines at mu +/- sigma
+        ax_logits.plot([i - 0.2, i + 0.2], 
+                       [mu_logits[i] + sigma_logits[i], mu_logits[i] + sigma_logits[i]], 
+                       logit_color, linewidth=1.5)
+        ax_logits.plot([i - 0.2, i + 0.2], 
+                       [mu_logits[i] - sigma_logits[i], mu_logits[i] - sigma_logits[i]], 
+                       logit_color, linewidth=1.5)
+        
+        # Draw mean marker - color based on prediction
+        if i == true_label:
+            marker_color = 'green'
+        elif i == pred_label:
+            marker_color = 'red'
+        else:
+            marker_color = logit_color
+            
+        ax_logits.scatter(i, mu_logits[i], color=marker_color, marker='s', 
+                          s=50, zorder=3, edgecolor='k', linewidth=0.5)
+    
+    ax_logits.set_xticks(classes)
+    ax_logits.set_xticklabels([CIFAR10_CLASSES[i] for i in classes], rotation=45, ha='right')
+    ax_logits.set_xlim(-0.5, NUM_CLASSES - 0.5)
+    ax_logits.grid(True, axis='y', linestyle=':', alpha=0.5)
+    ax_logits.set_ylabel('Logit Value', fontsize=11)
+    ax_logits.set_title('Logits (μ_z ± σ_z)', fontsize=12, fontweight='bold')
+    ax_logits.axhline(y=0, color='gray', linestyle='--', alpha=0.5)  # Zero line reference
+    
+    # Add legend for logits
+    legend_handles_logits = [
+        Line2D([0], [0], marker='s', color='w', label='μ_z', 
+               markerfacecolor=logit_color, markersize=8),
+        Line2D([0], [0], color=logit_color, lw=2, label='μ_z ± σ_z'),
+        Line2D([0], [0], marker='s', color='w', label='True class', 
+               markerfacecolor='green', markersize=8),
+        Line2D([0], [0], marker='s', color='w', label='Predicted', 
+               markerfacecolor='red', markersize=8),
+    ]
+    ax_logits.legend(handles=legend_handles_logits, loc='upper right', fontsize=9)
+    
+    # ===== Plot 3: Probabilities with Error Bars =====
+    for i in classes:
+        # Draw error bars
+        ax_probs.errorbar(i, mu_probs[i], yerr=sigma_probs[i], fmt='none', 
+                          ecolor=prob_color, elinewidth=1.5, capsize=5)
+        # Draw horizontal lines at mu +/- sigma
+        ax_probs.plot([i - 0.2, i + 0.2], 
+                      [mu_probs[i] + sigma_probs[i], mu_probs[i] + sigma_probs[i]], 
+                      prob_color, linewidth=1.5)
+        ax_probs.plot([i - 0.2, i + 0.2], 
+                      [mu_probs[i] - sigma_probs[i], mu_probs[i] - sigma_probs[i]], 
+                      prob_color, linewidth=1.5)
+        
+        # Draw mean marker - color based on prediction
+        if i == true_label:
+            marker_color = 'green'
+        elif i == pred_label:
+            marker_color = 'red'
+        else:
+            marker_color = prob_color
+            
+        ax_probs.scatter(i, mu_probs[i], color=marker_color, marker='s', 
+                         s=50, zorder=3, edgecolor='k', linewidth=0.5)
+    
+    ax_probs.set_xticks(classes)
+    ax_probs.set_xticklabels([CIFAR10_CLASSES[i] for i in classes], rotation=45, ha='right')
+    ax_probs.set_xlim(-0.5, NUM_CLASSES - 0.5)
+    ax_probs.set_ylim(-0.05, 1.05)
+    ax_probs.grid(True, axis='y', linestyle=':', alpha=0.5)
+    ax_probs.set_ylabel('Probability', fontsize=11)
+    ax_probs.set_title('Output Probabilities (μ_a ± σ_a)', fontsize=12, fontweight='bold')
+    
+    # Add legend for probabilities
+    legend_handles_probs = [
+        Line2D([0], [0], marker='s', color='w', label='μ_a', 
+               markerfacecolor=prob_color, markersize=8),
+        Line2D([0], [0], color=prob_color, lw=2, label='μ_a ± σ_a'),
+        Line2D([0], [0], marker='s', color='w', label='True class', 
+               markerfacecolor='green', markersize=8),
+        Line2D([0], [0], marker='s', color='w', label='Predicted', 
+               markerfacecolor='red', markersize=8),
+    ]
+    ax_probs.legend(handles=legend_handles_probs, loc='upper right', fontsize=9)
+    
+    # Calculate metrics
+    entropy = -np.sum(mu_probs * np.log(mu_probs + 1e-10))
+    prob_var = np.sum(sigma_probs**2)
+    logit_var = np.sum(sigma_logits**2)
+    
+    plt.tight_layout()
+    plt.suptitle(f'Image #{image_idx} | Entropy: {entropy:.3f} | '
+                 f'Logit Var: {logit_var:.4f} | Prob Var: {prob_var:.4f}', 
+                 fontsize=14, fontweight='bold', y=1.02)
+    
+    if save_path:
+        plt.savefig(save_path, dpi=150, bbox_inches='tight')
+        print(f"Example plot saved to {save_path}")
+    
+    plt.show()
+    
+    # Print statistics
+    print(f"\n{'='*70}")
+    print(f"Image #{image_idx} Analysis")
+    print(f"{'='*70}")
+    print(f"True Label: {CIFAR10_CLASSES[true_label]}")
+    print(f"Predicted: {CIFAR10_CLASSES[pred_label]}")
+    print(f"Correct: {'✓' if correct else '✗'}")
+    print(f"\nLogits (μ_z ± σ_z):")
+    print(f"  Pred class ({CIFAR10_CLASSES[pred_label]}): {mu_logits[pred_label]:.4f} ± {sigma_logits[pred_label]:.4f}")
+    print(f"  True class ({CIFAR10_CLASSES[true_label]}): {mu_logits[true_label]:.4f} ± {sigma_logits[true_label]:.4f}")
+    print(f"  Total logit variance: {logit_var:.6f}")
+    print(f"\nProbabilities (μ_a ± σ_a):")
+    print(f"  Pred class ({CIFAR10_CLASSES[pred_label]}): {mu_probs[pred_label]:.4f} ± {sigma_probs[pred_label]:.4f}")
+    print(f"  True class ({CIFAR10_CLASSES[true_label]}): {mu_probs[true_label]:.4f} ± {sigma_probs[true_label]:.4f}")
+    print(f"  Total prob variance: {prob_var:.6f}")
+    print(f"  Entropy: {entropy:.4f}")
+    print(f"{'='*70}\n")
+
+
+def plot_qualitative_examples(model_remax, model_logits, raw_dataset, 
+                               normalized_dataset, num_examples=3, save_dir=None,
+                               batch_size=128):
     """
     Generate qualitative examples: normal, high entropy, high variance predictions.
+    
+    Uses two models:
+        - model_remax: Full model with Remax head (for probabilities)
+        - model_logits: Same model without Remax (for logits)
+    
+    Args:
+        model_remax: Model with Remax head
+        model_logits: Model without Remax (outputs logits)
+        raw_dataset: CIFAR-10 test dataset without normalization (for display)
+        normalized_dataset: CIFAR-10 test dataset with normalization (for inference)
+        num_examples: Number of examples per category
+        save_dir: Directory to save plots
+        batch_size: Batch size for inference
     """
-    print("\nRunning inference for qualitative analysis...")
-    probs, var_probs, labels = run_inference(model, test_loader)
+    print("\nRunning batch inference for qualitative analysis...")
+    
+    # Create data loader for batch inference
+    data_loader = torch.utils.data.DataLoader(
+        normalized_dataset, batch_size=batch_size, shuffle=False, 
+        num_workers=2, drop_last=False
+    )
+    
+    # Run batch inference on both models
+    model_remax.eval()
+    model_logits.eval()
+    
+    all_probs = []
+    all_var_probs = []
+    all_logits = []
+    all_var_logits = []
+    all_labels = []
+    
+    for batch_idx, (images, labels) in enumerate(data_loader):
+        batch_images = images.numpy()
+        batch_labels = labels.numpy()
+        
+        batch_sz = batch_images.shape[0]
+        batch_flat = batch_images.reshape(batch_sz, -1)
+        
+        # Get probabilities from Remax model
+        m_prob, v_prob = model_remax(batch_flat)
+        probs = np.reshape(m_prob, (batch_sz, NUM_CLASSES))
+        var_probs = np.reshape(v_prob, (batch_sz, NUM_CLASSES))
+        
+        # Get logits from logits model
+        m_logit, v_logit = model_logits(batch_flat)
+        logits = np.reshape(m_logit, (batch_sz, NUM_CLASSES))
+        var_logits = np.reshape(v_logit, (batch_sz, NUM_CLASSES))
+        
+        all_probs.append(probs)
+        all_var_probs.append(var_probs)
+        all_logits.append(logits)
+        all_var_logits.append(var_logits)
+        all_labels.append(batch_labels)
+        
+        if (batch_idx + 1) % 20 == 0:
+            print(f"  Processed {(batch_idx + 1) * batch_size}/{len(normalized_dataset)} samples...")
+    
+    probs = np.vstack(all_probs)
+    var_probs = np.vstack(all_var_probs)
+    logits = np.vstack(all_logits)
+    var_logits = np.vstack(all_var_logits)
+    labels = np.concatenate(all_labels)
     
     predictions = np.argmax(probs, axis=1)
     std_probs = np.sqrt(var_probs)
+    std_logits = np.sqrt(var_logits)
     
     # Compute metrics
     entropy = compute_entropy(probs)
@@ -536,72 +833,48 @@ def plot_qualitative_examples(model, raw_dataset, test_loader,
     else:
         failure_indices = []
     
-    # Plot examples
-    print("\n" + "="*70)
-    print("NORMAL PREDICTIONS (High Confidence, Correct)")
-    print("="*70)
-    for i, idx in enumerate(normal_indices):
+    # Helper function to plot example
+    def plot_example(idx, category, example_num):
         # Get raw image for display
         raw_img, _ = raw_dataset[idx]
         raw_img = raw_img.numpy()
         
         save_path = None
         if save_dir:
-            save_path = os.path.join(save_dir, f"example_normal_{i}.png")
+            save_path = os.path.join(save_dir, f"example_{category}_{example_num}.png")
         
-        plot_prediction_example(
-            raw_img, labels[idx], probs[idx], std_probs[idx],
+        plot_prediction_with_logits(
+            raw_img, labels[idx], 
+            logits[idx], std_logits[idx],
+            probs[idx], std_probs[idx],
             image_idx=idx, save_path=save_path
         )
+    
+    # Plot examples
+    print("\n" + "="*70)
+    print("NORMAL PREDICTIONS (High Confidence, Correct)")
+    print("="*70)
+    for i, idx in enumerate(normal_indices):
+        plot_example(idx, "normal", i)
     
     print("\n" + "="*70)
     print("HIGH ENTROPY PREDICTIONS (Most Uncertain)")
     print("="*70)
     for i, idx in enumerate(high_entropy_indices):
-        raw_img, _ = raw_dataset[idx]
-        raw_img = raw_img.numpy()
-        
-        save_path = None
-        if save_dir:
-            save_path = os.path.join(save_dir, f"example_high_entropy_{i}.png")
-        
-        plot_prediction_example(
-            raw_img, labels[idx], probs[idx], std_probs[idx],
-            image_idx=idx, save_path=save_path
-        )
+        plot_example(idx, "high_entropy", i)
     
     print("\n" + "="*70)
     print("HIGH VARIANCE PREDICTIONS (Most Model Uncertainty)")
     print("="*70)
     for i, idx in enumerate(high_var_indices):
-        raw_img, _ = raw_dataset[idx]
-        raw_img = raw_img.numpy()
-        
-        save_path = None
-        if save_dir:
-            save_path = os.path.join(save_dir, f"example_high_variance_{i}.png")
-        
-        plot_prediction_example(
-            raw_img, labels[idx], probs[idx], std_probs[idx],
-            image_idx=idx, save_path=save_path
-        )
+        plot_example(idx, "high_variance", i)
     
     if len(failure_indices) > 0:
         print("\n" + "="*70)
         print("CONFIDENT FAILURES (High Confidence, Incorrect)")
         print("="*70)
         for i, idx in enumerate(failure_indices):
-            raw_img, _ = raw_dataset[idx]
-            raw_img = raw_img.numpy()
-            
-            save_path = None
-            if save_dir:
-                save_path = os.path.join(save_dir, f"example_failure_{i}.png")
-            
-            plot_prediction_example(
-                raw_img, labels[idx], probs[idx], std_probs[idx],
-                image_idx=idx, save_path=save_path
-            )
+            plot_example(idx, "failure", i)
 
 
 # ============================================================================
@@ -705,21 +978,48 @@ def evaluate_model(model_path: str, data_dir: str = "./data",
     print("Model Evaluation Pipeline")
     print("="*70)
     
-    # Build and load model
-    print(f"\nLoading model from {model_path}...")
-    model = build_3cnn_remax()
-    
     use_cuda = pytagi.cuda.is_available() and device == "cuda"
+    
+    # Build and load Remax model (full model with probabilities)
+    print(f"\nLoading Remax model from {model_path}...")
+    model_remax = build_3cnn_remax()
+    
     if use_cuda:
-        model.to_device("cuda")
+        model_remax.to_device("cuda")
         print("Using device: cuda")
     else:
-        model.set_threads(8)
+        model_remax.set_threads(8)
         print("Using device: cpu")
     
-    model.load(model_path)
+    model_remax.load(model_path)
     if use_cuda:
-        model.params_to_device()
+        model_remax.params_to_device()
+    
+    # Build and load Logits model (same architecture without Remax)
+    print("Building logits model (without Remax)...")
+    model_logits = build_3cnn_logits()
+    
+    if use_cuda:
+        model_logits.to_device("cuda")
+    else:
+        model_logits.set_threads(8)
+    
+    # Transfer weights from remax model to logits model
+    # Both models share the same weights except for the final Remax layer
+    print("Transferring weights to logits model...")
+    
+    # Get parameters from remax model
+    if use_cuda:
+        model_remax.params_to_host()
+    
+    # Copy parameters (both models have same architecture except Remax)
+    model_logits.load(model_path)
+    
+    if use_cuda:
+        model_remax.params_to_device()
+        model_logits.params_to_device()
+    
+    print("Both models ready for inference!")
     
     # Load datasets
     print("\nLoading datasets...")
@@ -727,9 +1027,20 @@ def evaluate_model(model_path: str, data_dir: str = "./data",
     svhn_loader, _ = load_svhn_test(data_dir, batch_size)
     cifar_raw = load_cifar10_raw(data_dir)
     
-    # Run inference on CIFAR-10
+    # Also load normalized dataset for single-sample inference
+    mean = (0.4914, 0.4822, 0.4465)
+    std = (0.2470, 0.2435, 0.2616)
+    transform = transforms.Compose([
+        transforms.ToTensor(),
+        transforms.Normalize(mean, std),
+    ])
+    cifar_normalized = torchvision.datasets.CIFAR10(
+        root=data_dir, train=False, download=True, transform=transform
+    )
+    
+    # Run inference on CIFAR-10 (using remax model)
     print("\nRunning inference on CIFAR-10...")
-    cifar_probs, cifar_var, cifar_labels = run_inference(model, cifar_loader)
+    cifar_probs, cifar_var, cifar_labels = run_inference(model_remax, cifar_loader)
     cifar_preds = np.argmax(cifar_probs, axis=1)
     
     # Compute accuracy
@@ -738,7 +1049,7 @@ def evaluate_model(model_path: str, data_dir: str = "./data",
     
     # Run inference on SVHN (OOD)
     print("Running inference on SVHN (OOD)...")
-    svhn_probs, svhn_var, svhn_labels = run_inference(model, svhn_loader)
+    svhn_probs, svhn_var, svhn_labels = run_inference(model_remax, svhn_loader)
     
     # ==========================================
     # 1. ECE Plot
@@ -784,16 +1095,18 @@ def evaluate_model(model_path: str, data_dir: str = "./data",
     )
     
     # ==========================================
-    # 4. Qualitative Examples
+    # 4. Qualitative Examples (with Logits + Probabilities)
     # ==========================================
     print("\n" + "-"*70)
-    print("4. Generating Qualitative Examples...")
+    print("4. Generating Qualitative Examples (Logits + Probabilities)...")
     print("-"*70)
     
     plot_qualitative_examples(
-        model, cifar_raw, cifar_loader, 
+        model_remax, model_logits, 
+        cifar_raw, cifar_normalized,
         num_examples=num_examples,
-        save_dir=output_dir
+        save_dir=output_dir,
+        batch_size=batch_size
     )
     
     print("\n" + "="*70)
