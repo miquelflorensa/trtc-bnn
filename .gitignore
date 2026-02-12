@@ -131,4 +131,7 @@ cleanup_*.sh
 nohup.out
 test_normalized_softmax.py
 
-.cuTAGI
+# =============================================================================
+# External libraries (keep locally, don't commit)
+# =============================================================================
+cuTAGI/
