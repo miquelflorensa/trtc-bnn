@@ -130,3 +130,5 @@ cleanup_*.sh
 *.out
 nohup.out
 test_normalized_softmax.py
+
+.cuTAGI
