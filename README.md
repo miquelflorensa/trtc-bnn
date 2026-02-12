@@ -210,3 +210,11 @@ MIT License
 ## Acknowledgments
 
 This work uses [cuTAGI](https://github.com/lhnguyen102/cuTAGI) for Bayesian Neural Network training.
+
+---
+
+## Repository Organization
+
+This repository has been cleaned and organized. See [REPOSITORY_STRUCTURE.md](REPOSITORY_STRUCTURE.md) for details on the current structure and how to reproduce results.
+
+All removed files have been backed up and can be found in the `backup_*/` directory.
